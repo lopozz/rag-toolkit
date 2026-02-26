@@ -1,9 +1,0 @@
-# langchain==0.3.25
-# langchain-community #==0.3.13
-# langchain-core #==0.3.28
-# langchain-text-splitters #==0.3.4
-# langsmith #==0.1.147
-llama_cpp_python==0.3.9
-ragas==0.2.15
-vllm==0.9.1
-gradio==5.34.2
