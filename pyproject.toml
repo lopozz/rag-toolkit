@@ -1,0 +1,15 @@
+[project]
+name = "rag-toolkit"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "elasticsearch>=9.3.0",
+    "ir-measures>=0.4.3",
+    "mteb>=2.10.0",
+    "nltk>=3.9.3",
+    "pandas>=2.3.3",
+    "sentence-transformers>=5.2.3",
+    "vllm>=0.16.0",
+]
