@@ -1,8 +1,10 @@
 .venv
 notebooks/
-data/
+data/mtrag/conversations.json
 !benchmark/data/
 __pycache__
 results/
 traces/
 elastic-start-local/
+data/
+datasets.ipynb

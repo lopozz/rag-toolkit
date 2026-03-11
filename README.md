@@ -1,5 +1,5 @@
 # 🚀 rag-toolkit
-A library designed to evaluate Retrieval-Augmented Generation (RAG) pipelines. 
+Handy scripts to run and evaluate RAG systems.
 
 ## 🛠 Installation & Setup
 
