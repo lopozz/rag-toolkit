@@ -5,11 +5,14 @@ from __future__ import annotations
 
 import os
 import sys
+import json
 import argparse
 import subprocess
 import urllib.error
 import urllib.request
+from typing import Any
 from pathlib import Path
+from datetime import datetime
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from src.utils import safe_filename
@@ -163,6 +166,7 @@ def build_command(
         "--result-filename",
         result_filename,
         "--disable-tqdm",
+        "--save-detailed",
     ]
 
     append_arg(command, "--dataset-path", args.dataset_path)
@@ -173,6 +177,31 @@ def build_command(
     return command
 
 
+def clean_benchmark_json_file(
+    input_path: str | Path,
+    output_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """
+    Load a benchmark JSON, remove `input_lens`, keep only unique non-empty
+    error messages, and optionally save the cleaned result.
+    """
+    input_path = Path(input_path)
+    output_path = Path(output_path) if output_path else input_path
+
+    with input_path.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    data.pop("input_lens", None)
+
+    errors = data.get("errors", [])
+    data["errors"] = sorted(
+        {err.strip() for err in errors if isinstance(err, str) and err.strip()}
+    )
+
+    with output_path.open("w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+
 def run_single_benchmark(
     args: argparse.Namespace,
     input_length: int,
@@ -180,11 +209,14 @@ def run_single_benchmark(
 ):
     """Run one benchmark command and return the extracted metrics."""
     model_name = safe_filename(args.model)
-    result_filename = f"{model_name}--{args.num_prompts}prompts--{input_length}tk--{request_rate}rps.json"
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    result_filename = f"{model_name}--{args.num_prompts}prompts--{input_length}tk--{request_rate}rps--{timestamp}.json"
     command = build_command(args, input_length, request_rate, result_filename)
 
     print(f"Running: {' '.join(command)}")
     subprocess.run(command, check=True)
+
+    clean_benchmark_json_file(os.path.join(args.result_dir, result_filename))
 
 
 def main() -> None:
