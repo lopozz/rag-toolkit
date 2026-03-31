@@ -5,7 +5,7 @@ settings:
     - KQ: all words in the query are present in the target document
     - SQ: any words in the query are present in the target document
     - MQ: some words in the query are present in the target document
-This script evaluates document-level retrieval over the synthetic finance/PII 
+This script evaluates document-level retrieval over the synthetic finance/PII
 dataset across multiple languages (en, it, fr, de) and embedding models.
 
 Configurable parameters
@@ -48,7 +48,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.es_utils import (
+from src.es_utils import (  # noqa: E402
     bm25_search,
     knn_search,
     rrf_search,
@@ -57,7 +57,7 @@ from src.es_utils import (
 )
 
 load_dotenv("elastic-start-local/.env")
-nltk.download("punkt_tab") # TODO is there another way not to use nltk?
+nltk.download("punkt_tab")  # TODO is there another way not to use nltk?
 
 MODELS = [
     "sentence-transformers/distiluse-base-multilingual-cased-v1",
@@ -75,7 +75,7 @@ LANGUAGES = {
 }
 
 MAX_WORDS_LIST = [100]  # Different chunk sizes to test
-METRIC = 'nDCG@10'
+METRIC = "nDCG@10"
 R_MODEL = "knn"
 
 N = 100  # Number of queries # TODO is this fixed?
@@ -86,7 +86,9 @@ client = Elasticsearch(
 )
 
 
-def make_actions(df, model, lang_code, max_words, index_name, text_col = "generated_text"):
+def make_actions(
+    df, model, lang_code, max_words, index_name, text_col="generated_text"
+):
     nltk_lang = LANGUAGES[lang_code]["nltk"]
 
     for row in df.itertuples(index=False):
@@ -133,8 +135,12 @@ def build_model_configs(client, index_name, model, selected=None):
     """Select on ly the tested model"""
     configs = {
         "bm25": lambda q, k: bm25_search(client, index_name, q, k=k),
-        "knn": lambda q, k: knn_search(client, index_name, model, q, k=k, num_candidates=max(50, k * 5)),
-        "rrf": lambda q, k: rrf_search(client, index_name, model, q, k=k, num_candidates=max(50, k * 5)),
+        "knn": lambda q, k: knn_search(
+            client, index_name, model, q, k=k, num_candidates=max(50, k * 5)
+        ),
+        "rrf": lambda q, k: rrf_search(
+            client, index_name, model, q, k=k, num_candidates=max(50, k * 5)
+        ),
     }
     return {k: v for k, v in configs.items() if selected is None or k == selected}
 
@@ -142,7 +148,7 @@ def build_model_configs(client, index_name, model, selected=None):
 def run_evaluation(model_configs, queries_dict, metrics):
     """
     Run evaluation for a specific model and language
-    
+
         qrels = {
             'Q0': {
                 "D0": 0,
@@ -202,7 +208,7 @@ def main():
         for model_name in MODELS
     }
 
-    metrics = [R@10, nDCG@10] 
+    metrics = [R @ 10, nDCG @ 10]
 
     # Iterate over models
     for model_name in MODELS:
@@ -220,14 +226,25 @@ def main():
 
             # Load queries
             base = f"data/synthetic_pii_finance/{lang_code}"
-            kq = pd.read_csv(f"{base}/keyword_queries_{lang_code}_{N}.csv", converters={"doc_ids": ast.literal_eval})
-            sq = pd.read_csv(f"{base}/semantic_queries_{lang_code}_{N}.csv", converters={"doc_ids": ast.literal_eval})
-            mq = pd.read_csv(f"{base}/mixed_queries_{lang_code}_{N}.csv", converters={"doc_ids": ast.literal_eval})
+            kq = pd.read_csv(
+                f"{base}/keyword_queries_{lang_code}_{N}.csv",
+                converters={"doc_ids": ast.literal_eval},
+            )
+            sq = pd.read_csv(
+                f"{base}/semantic_queries_{lang_code}_{N}.csv",
+                converters={"doc_ids": ast.literal_eval},
+            )
+            mq = pd.read_csv(
+                f"{base}/mixed_queries_{lang_code}_{N}.csv",
+                converters={"doc_ids": ast.literal_eval},
+            )
             df = pd.read_csv(f"{base}/synthetic_pii_finance_{lang_code}.csv")
-            
+
             # kq, sq, mq, contains doc ids that are use to filter the csv with text
-            all_doc_ids = set(
-                sq['doc_ids'].explode()) | set(kq['doc_ids'].explode()) | set(mq['doc_ids'].explode()
+            all_doc_ids = (
+                set(sq["doc_ids"].explode())
+                | set(kq["doc_ids"].explode())
+                | set(mq["doc_ids"].explode())
             )
             df = df[df["id"].isin(all_doc_ids)]
 
@@ -269,32 +286,22 @@ def main():
 
                 # Run evaluation
                 queries_dict = {"kq": kq, "sq": sq, "mq": mq}
-                model_configs = build_model_configs(client, index_name, model, selected=R_MODEL)
+                model_configs = build_model_configs(
+                    client, index_name, model, selected=R_MODEL
+                )
                 eval_results = run_evaluation(model_configs, queries_dict, metrics)
-                
-                kq_score = (
-                    eval_results.get("kq", {}).get(METRIC, {}).get(R_MODEL, 0.0)
-                )
-                sq_score = (
-                    eval_results.get("sq", {}).get(METRIC, {}).get(R_MODEL, 0.0)
-                )
-                mq_score = (
-                    eval_results.get("mq", {}).get(METRIC, {}).get(R_MODEL, 0.0)
-                )
+
+                kq_score = eval_results.get("kq", {}).get(METRIC, {}).get(R_MODEL, 0.0)
+                sq_score = eval_results.get("sq", {}).get(METRIC, {}).get(R_MODEL, 0.0)
+                mq_score = eval_results.get("mq", {}).get(METRIC, {}).get(R_MODEL, 0.0)
 
                 print(
                     f"      KQ {METRIC}: {kq_score:.2f}, SQ {METRIC}: {sq_score:.2f}, MQ {METRIC}: {mq_score:.2f}"
                 )
 
-                final_results[model_name][lang_name]["KQ"].append(
-                    round(kq_score, 2)
-                )
-                final_results[model_name][lang_name]["SQ"].append(
-                    round(sq_score, 2)
-                )
-                final_results[model_name][lang_name]["MQ"].append(
-                    round(mq_score, 2)
-                )
+                final_results[model_name][lang_name]["KQ"].append(round(kq_score, 2))
+                final_results[model_name][lang_name]["SQ"].append(round(sq_score, 2))
+                final_results[model_name][lang_name]["MQ"].append(round(mq_score, 2))
 
                 # Clean up index to save space
                 client.indices.delete(index=index_name, ignore_unavailable=True)

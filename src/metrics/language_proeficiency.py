@@ -25,7 +25,7 @@ from ragas.metrics.base import (
 )
 from ragas.prompt import PydanticPrompt
 from langchain_core.callbacks import Callbacks
-from pydantic import BaseModel, Field, conlist, validator
+from pydantic import BaseModel, Field, validator
 
 LOGGER = logging.getLogger(__name__)
 
@@ -90,8 +90,7 @@ class LanguageProficiencyPrompt(
                 ),
             ),
             ScoreWithReason(
-                score=0.95,
-                reason="Italiano corretto e formale, aderente al prompt."
+                score=0.95, reason="Italiano corretto e formale, aderente al prompt."
             ),
         ),
         (
@@ -103,7 +102,7 @@ class LanguageProficiencyPrompt(
             ),
             ScoreWithReason(
                 score=0.15,
-                reason="Registro colloquiale e errori di punteggiatura, non aderente al tono richiesto."
+                reason="Registro colloquiale e errori di punteggiatura, non aderente al tono richiesto.",
             ),
         ),
     ]
@@ -114,18 +113,18 @@ class LanguageProficiencyIT(MetricWithLLM, SingleTurnMetric):
     """Measure Italian language proficiency & prompt‑compliance of a response."""
 
     name: str = "language_proficiency_it"
-    system_prompt: str = (
-        "Sei un assistente AI professionale che risponde in tono formale e cortese, in italiano."
-    )
+    system_prompt: str = "Sei un assistente AI professionale che risponde in tono formale e cortese, in italiano."
 
     _required_columns: t.Dict[MetricType, t.Set[str]] = field(
         default_factory=lambda: {
-            MetricType.SINGLE_TURN: {"response"} # with system_prompt it doesn't work
+            MetricType.SINGLE_TURN: {"response"}  # with system_prompt it doesn't work
         }
     )
 
     output_type: MetricOutputType = MetricOutputType.CONTINUOUS
-    proficiency_prompt: PydanticPrompt = field(default_factory=LanguageProficiencyPrompt)
+    proficiency_prompt: PydanticPrompt = field(
+        default_factory=LanguageProficiencyPrompt
+    )
     max_retries: int = 1
 
     async def _single_turn_ascore(
@@ -152,9 +151,10 @@ class LanguageProficiencyIT(MetricWithLLM, SingleTurnMetric):
         )
 
         score = float(evaluation.score)
-        LOGGER.debug("Language proficiency score: %s (reason: %s)", score, evaluation.reason)
+        LOGGER.debug(
+            "Language proficiency score: %s (reason: %s)", score, evaluation.reason
+        )
         return score
-
 
 
 language_proficiency_it = LanguageProficiencyIT()

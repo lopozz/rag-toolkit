@@ -119,7 +119,7 @@ class ResponseGroundednessIT(MetricWithLLM, SingleTurnMetric):
                     )
                 )
                 req = self.llm.agenerate_text(
-                # req = self.llm.agenerate(
+                    # req = self.llm.agenerate(
                     formatted_prompt,
                     n=1,
                     # temperature=0.1,
@@ -139,7 +139,7 @@ class ResponseGroundednessIT(MetricWithLLM, SingleTurnMetric):
                     )
                 )
                 req = self.llm.agenerate_text(
-                # req = self.llm.agenerate(
+                    # req = self.llm.agenerate(
                     formatted_prompt,
                     n=1,
                     # temperature=0.1,
@@ -160,6 +160,6 @@ class ResponseGroundednessIT(MetricWithLLM, SingleTurnMetric):
             score = np.nan
 
         return score
-    
+
 
 groundedness_it = ResponseGroundednessIT()

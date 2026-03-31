@@ -1,0 +1,9 @@
+model: "sentence-transformers/distiluse-base-multilingual-cased-v1"
+port: 8000
+
+input_lengths: [512]
+request_rates: [5.0]
+num_prompts: 100
+max_concurrency: 32
+dataset_name: "random"
+num_warmups: 3

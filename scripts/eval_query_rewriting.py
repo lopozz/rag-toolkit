@@ -52,35 +52,37 @@ if __name__ == "__main__":
     # lang = 'qen_pit'
     # output_path = f"output/language_instruction/{lang}/results-{VLLM_MODEL.split('/')[1]}.jsonl"
     # out_f = open(output_path, "w", encoding="utf-8")
-    lang = 'it'
-    with open(f'data/mtrag/{lang}/conversations_10.json', 'r', encoding='utf-8') as file:
+    lang = "it"
+    with open(
+        f"data/mtrag/{lang}/conversations_10.json", "r", encoding="utf-8"
+    ) as file:
         conversations = json.load(file)
 
     for j, c in enumerate(conversations[5:6]):
-        messages = c['messages']
+        messages = c["messages"]
 
         for i in list(range(0, len(messages), 2)):
             history = []
-            assert c['messages'][i]['speaker'] == 'user'
+            assert c["messages"][i]["speaker"] == "user"
 
-            if i==0: continue
+            if i == 0:
+                continue
             start_index = max(0, i - 6)
             history_window = messages[start_index : i + 1]
 
-            formatted_history = ''
-            debug_history = ''
-            
+            formatted_history = ""
+            debug_history = ""
+
             for msg in history_window:
-                role_label = "USER" if msg['speaker'] == 'user' else "ASSISTANT"
+                role_label = "USER" if msg["speaker"] == "user" else "ASSISTANT"
                 formatted_history += f"{role_label}: {msg['text']}\n"
                 debug_history += f"{role_label}: {msg['text']}\n"
-                if msg['speaker'] == 'user':
+                if msg["speaker"] == "user":
                     debug_history += f"   - {msg['enrichments']['Answerability']}\n   - {msg['enrichments']['Multi-Turn']}\n   - {msg['enrichments']['Question Type']}\n"
-                history.append({"role": role_label.lower(), "content": msg['text']})
-                
-               
+                history.append({"role": role_label.lower(), "content": msg["text"]})
+
             print()
-            print('='*100)
+            print("=" * 100)
             print(debug_history.strip())
 
             user_content = (
@@ -94,19 +96,19 @@ if __name__ == "__main__":
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": user_content},
                 ],
-                "temperature": 0.3
+                "temperature": 0.3,
             }
 
             url = VLLM_BASE_URL.rstrip("/") + "/v1/chat/completions"
-            headers = {"Content-Type": "application/json",}
+            headers = {
+                "Content-Type": "application/json",
+            }
 
             resp = requests.post(url, headers=headers, data=json.dumps(payload))
             resp = resp.json()
             answer = resp["choices"][0]["message"]["content"]
 
             print(answer)
-            print('='*100)
+            print("=" * 100)
             print()
         break
-                        
-        

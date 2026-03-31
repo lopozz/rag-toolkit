@@ -178,5 +178,6 @@ class NoiseSensitivityIT(MetricWithLLM, SingleTurnMetric):
         answers["ground_truth2answer"] = np.array([answers["ground_truth2answer"]])
         answers = {k: v.astype(bool) for k, v in answers.items()}
         return self._compute_score(answers)
-    
+
+
 noise_sensitivity_it = NoiseSensitivityIT(mode="irrelevant")

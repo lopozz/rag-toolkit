@@ -27,6 +27,7 @@ class StatementGeneratorInputIT(BaseModel):
 class StatementGeneratorOutputIT(BaseModel):
     statements: t.List[str] = Field(description="L'affermazione generata")
 
+
 class StatementGeneratorPromptIT(
     PydanticPrompt[StatementGeneratorInputIT, StatementGeneratorOutputIT]
 ):
@@ -52,9 +53,13 @@ class StatementGeneratorPromptIT(
 
 
 class StatementFaithfulnessAnswerIT(BaseModel):
-    statement: str = Field(..., description="l'affermazione originale, parola per parola")
+    statement: str = Field(
+        ..., description="l'affermazione originale, parola per parola"
+    )
     reason: str = Field(..., description="la motivazione del verdetto")
-    verdict: int = Field(..., description="il verdetto (0/1) sull'attendibilità dell'affermazione")
+    verdict: int = Field(
+        ..., description="il verdetto (0/1) sull'attendibilità dell'affermazione"
+    )
 
 
 class NLIStatementOutput(BaseModel):
@@ -74,7 +79,6 @@ class NLIStatementPromptIT(PydanticPrompt[NLIStatementInputIT, NLIStatementOutpu
         (
             NLIStatementInputIT(
                 context="""John è uno studente presso l'Università XYZ. Sta conseguendo una laurea in Informatica. È iscritto a diversi corsi questo semestre, tra cui Strutture Dati, Algoritmi e Gestione di Basi di Dati. John è uno studente diligente e dedica molto tempo allo studio e al completamento dei compiti. Spesso rimane fino a tardi in biblioteca per lavorare ai suoi progetti.""",
-
                 statements=[
                     "John è iscritto al corso di Biologia.",
                     "John sta seguendo un corso di Intelligenza Artificiale.",

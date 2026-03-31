@@ -34,15 +34,16 @@ VLLM_BASE_URL = "http://localhost:8000"
 VLLM_MODEL = "mistralai/Ministral-3-3B-Instruct-2512"
 TRIALS = 3
 
+
 def completeness_score(answer: str, entities: List[str]) -> float:
     """
     Completeness = fraction of entities (case-insensitive substring match) found in answer.
     """
 
-    a = answer.lower().replace('.', '').replace(',', '')
+    a = answer.lower().replace(".", "").replace(",", "")
     hit = 0
     for e in entities:
-        if e.lower().replace('.', '') in a:
+        if e.lower().replace(".", "") in a:
             hit += 1
     return hit / len(entities)
 
@@ -51,34 +52,32 @@ def missing_entities(answer: str, entities: List[str]) -> List[str]:
     a = answer.lower()
     return [e for e in entities if e.lower() not in a]
 
+
 if __name__ == "__main__":
     # lang = 'en'
     # output_path = f"output/{lang}/results-{VLLM_MODEL.split('/')[1]}.jsonl"
 
-    lang = 'qit_pen'
-    output_path = f"output/language_instruction/{lang}/results-{VLLM_MODEL.split('/')[1]}.jsonl"
+    lang = "qit_pen"
+    output_path = (
+        f"output/language_instruction/{lang}/results-{VLLM_MODEL.split('/')[1]}.jsonl"
+    )
     out_f = open(output_path, "w", encoding="utf-8")
-    
-    
+
     # input_path = f'data/synthetic_pii_finance/{lang}/answerable_10.jsonl'
-    input_path = f'data/language_instruction/answerable_10_{lang}.jsonl'
+    input_path = f"data/language_instruction/answerable_10_{lang}.jsonl"
     items = []
-    with open(input_path, 'r', encoding='utf-8') as f:
+    with open(input_path, "r", encoding="utf-8") as f:
         for line in f:
             items.append(json.loads(line))
 
     for j, item in enumerate(items[:3]):
-        print(">"*50 + f" ITEM {j+1} " + "<"*50)
+        print(">" * 50 + f" ITEM {j + 1} " + "<" * 50)
         question = item["question"]
         entities = item["entities"]
-        paragraphs = '\n'.join(['\n'.join(ps) for ps in item["paragraphs"]])
+        paragraphs = "\n".join(["\n".join(ps) for ps in item["paragraphs"]])
         free_form_answer = item["free_form_answer"]
 
-
-        user_content = (
-            f"Start documents\n\n{paragraphs}\n\nEnd documents\n\n"
-            f"{question}"
-        )
+        user_content = f"Start documents\n\n{paragraphs}\n\nEnd documents\n\n{question}"
 
         payload = {
             "model": VLLM_MODEL,
@@ -86,7 +85,7 @@ if __name__ == "__main__":
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": user_content},
             ],
-            "temperature": 0.3
+            "temperature": 0.3,
         }
 
         url = VLLM_BASE_URL.rstrip("/") + "/v1/chat/completions"
@@ -104,27 +103,32 @@ if __name__ == "__main__":
             # score = completeness_score(answer.split('</think>')[1].strip(), entities)
             score = completeness_score(answer, entities)
             miss = missing_entities(answer, entities)
-            
 
             scores.append(score)
-            trials_out.append({
-                "trial": t,
-                "answer": answer,
-                "completeness": score,
-                "missing_entities": miss,
-                "usage": resp.get("usage"),
-            })
-            print("="*50 + f" TRIAL {t+1} " + "="*50)
-            if score!=1:
-                print(f"Question: {question}\nGold answer: {free_form_answer}\nEntities: {entities}\nScore: {score}\nMissing entities: {miss}\n\nAnswer:\n{answer}")
+            trials_out.append(
+                {
+                    "trial": t,
+                    "answer": answer,
+                    "completeness": score,
+                    "missing_entities": miss,
+                    "usage": resp.get("usage"),
+                }
+            )
+            print("=" * 50 + f" TRIAL {t + 1} " + "=" * 50)
+            if score != 1:
+                print(
+                    f"Question: {question}\nGold answer: {free_form_answer}\nEntities: {entities}\nScore: {score}\nMissing entities: {miss}\n\nAnswer:\n{answer}"
+                )
             else:
-                print(f"Question: {question}\nGold answer: {free_form_answer}\nEntities: {entities}\nScore: {score}\n\nAnswer:\n{answer}")
-            print("="*120 + "\n")
+                print(
+                    f"Question: {question}\nGold answer: {free_form_answer}\nEntities: {entities}\nScore: {score}\n\nAnswer:\n{answer}"
+                )
+            print("=" * 120 + "\n")
 
         row = {
             "question": question,
             "entities": entities,
-            "avg_completeness": sum(scores)/len(scores),
+            "avg_completeness": sum(scores) / len(scores),
             "gold": item["free_form_answer"],
             "trials": trials_out,
         }
@@ -132,5 +136,3 @@ if __name__ == "__main__":
         # out_f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
     out_f.close()
-
-

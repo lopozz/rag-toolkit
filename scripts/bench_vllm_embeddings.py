@@ -1,430 +1,262 @@
 #!/usr/bin/env python3
-"""
-Simple benchmark for a vLLM embeddings endpoint.
-
-The script sends OpenAI-compatible POST requests to `/v1/embeddings` while
-sweeping:
-1. Approximate input length
-2. Target request rate
-
-It reports:
-- achieved RPS
-- average latency
-- p95 latency
-
-By default it uses a synthetic random-text dataset so it can run without any
-external files. A plain-text or JSONL dataset can be provided if desired.
-"""
+"""Run embedding benchmark sweeps with `vllm bench serve`."""
 
 from __future__ import annotations
 
 import argparse
-import concurrent.futures
-import json
-import random
-import statistics
-import string
-import threading
-import time
-import urllib.error
-import urllib.request
-from dataclasses import dataclass, asdict
+import subprocess
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Any
+import yaml
 
 
-DEFAULT_RATES = [1.0, 2.0, 4.0, 8.0]
 DEFAULT_INPUT_LENGTHS = [32, 128, 512, 1024]
-DEFAULT_DATASET_SIZE = 512
+DEFAULT_REQUEST_RATES = [1.0, 2.0, 4.0, 8.0]
 
 
 @dataclass
-class RequestResult:
-    ok: bool
-    latency_s: float
-    status_code: int | None
-    error: str | None
+class BenchmarkSummary:
+    """Store the metrics extracted from one benchmark run."""
 
-
-@dataclass
-class BenchmarkResult:
     input_length: int
     target_rps: float
-    requests_sent: int
-    requests_ok: int
-    requests_failed: int
-    elapsed_s: float
     achieved_rps: float
-    avg_latency_ms: float
+    latency_ms: float
     p95_latency_ms: float
+    result_file: str
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments for the benchmark sweep."""
     parser = argparse.ArgumentParser(
-        description="Benchmark a vLLM embeddings endpoint across input lengths and request rates."
+        description="Benchmark a vLLM embedding endpoint with vllm bench serve."
     )
+    parser.add_argument(
+        "config",
+        nargs="?",
+        default=None,
+        help="Optional YAML config path or config name under configs/embedders.",
+    )
+    parser.add_argument("--model", default=None, help="Served model name.")
     parser.add_argument(
         "--base-url",
         default="http://localhost:8000",
-        help="Base URL of the vLLM server.",
-    )
-    parser.add_argument(
-        "--model",
-        required=True,
-        help="Model name exposed by the vLLM server.",
-    )
-    parser.add_argument(
-        "--api-key",
-        default=None,
-        help="Optional bearer token for OpenAI-compatible auth.",
+        help="Base URL of the running vLLM server.",
     )
     parser.add_argument(
         "--input-lengths",
-        type=int,
         nargs="+",
+        type=int,
         default=DEFAULT_INPUT_LENGTHS,
-        help="Approximate token-like input lengths to benchmark.",
+        help="Input lengths to benchmark.",
     )
     parser.add_argument(
         "--request-rates",
-        type=float,
         nargs="+",
-        default=DEFAULT_RATES,
-        help="Target request rates in requests per second.",
+        type=float,
+        default=DEFAULT_REQUEST_RATES,
+        help="Request rates to benchmark.",
     )
     parser.add_argument(
-        "--requests-per-run",
+        "--num-prompts",
         type=int,
         default=100,
-        help="Number of requests to send for each length/rate combination.",
+        help="Number of requests per benchmark run.",
     )
     parser.add_argument(
-        "--max-workers",
+        "--max-concurrency",
         type=int,
-        default=64,
-        help="Maximum number of worker threads used to issue requests.",
+        default=32,
+        help="Maximum number of concurrent requests.",
     )
     parser.add_argument(
-        "--timeout",
-        type=float,
-        default=60.0,
-        help="Per-request timeout in seconds.",
-    )
-    parser.add_argument(
-        "--dataset",
-        choices=["random", "text", "jsonl"],
+        "--dataset-name",
         default="random",
-        help="Input dataset source.",
+        help="Dataset name passed to vllm bench serve.",
     )
     parser.add_argument(
         "--dataset-path",
         type=Path,
         default=None,
-        help="Path to a text or JSONL dataset file.",
+        help="Optional dataset path for non-random datasets.",
     )
     parser.add_argument(
-        "--jsonl-field",
-        default="text",
-        help="Field to read from each JSONL record when --dataset jsonl is used.",
-    )
-    parser.add_argument(
-        "--dataset-size",
+        "--num-warmups",
         type=int,
-        default=DEFAULT_DATASET_SIZE,
-        help="Number of base samples to keep in memory for the random dataset.",
+        default=3,
+        help="Number of warmup requests for each run.",
     )
     parser.add_argument(
-        "--warmup-requests",
-        type=int,
-        default=5,
-        help="Warmup requests sent before the measured runs start.",
+        "--api-key",
+        default=None,
+        help="Optional API key for the OpenAI-compatible server.",
+    )
+    parser.add_argument(
+        "--result-dir",
+        type=Path,
+        default=Path("results/vllm_embeddings"),
+        help="Directory where vLLM result JSON files are written.",
     )
     parser.add_argument(
         "--output-json",
         type=Path,
         default=None,
-        help="Optional path to save full benchmark results as JSON.",
+        help="Optional path to save the compact benchmark summary.",
     )
     return parser.parse_args()
 
 
-def build_random_dataset(dataset_size: int) -> list[str]:
-    rng = random.Random(7)
-    vocab = [
-        "".join(rng.choices(string.ascii_lowercase, k=rng.randint(3, 10)))
-        for _ in range(2048)
-    ]
-    samples: list[str] = []
-    for _ in range(dataset_size):
-        length = rng.randint(32, 256)
-        samples.append(" ".join(rng.choice(vocab) for _ in range(length)))
-    return samples
+def load_config(config_path: Path | None) -> dict[str, Any]:
+    """Load benchmark defaults from a YAML config file."""
 
-
-def load_dataset(args: argparse.Namespace) -> list[str]:
-    if args.dataset == "random":
-        return build_random_dataset(args.dataset_size)
-
-    if args.dataset_path is None:
-        raise ValueError("--dataset-path is required when --dataset is not random.")
-
-    if args.dataset == "text":
-        lines = [
-            line.strip()
-            for line in args.dataset_path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
-        if not lines:
-            raise ValueError("Text dataset is empty.")
-        return lines
-
-    records: list[str] = []
-    with args.dataset_path.open("r", encoding="utf-8") as handle:
-        for line_number, line in enumerate(handle, start=1):
-            line = line.strip()
-            if not line:
-                continue
-            payload = json.loads(line)
-            value = payload.get(args.jsonl_field)
-            if isinstance(value, str) and value.strip():
-                records.append(value.strip())
-            else:
-                raise ValueError(
-                    f"Missing string field '{args.jsonl_field}' at JSONL line {line_number}."
-                )
-    if not records:
-        raise ValueError("JSONL dataset is empty.")
-    return records
-
-
-def resize_text(text: str, target_length: int) -> str:
-    words = text.split()
-    if not words:
-        words = ["empty"]
-
-    if len(words) >= target_length:
-        return " ".join(words[:target_length])
-
-    repeats = (target_length + len(words) - 1) // len(words)
-    expanded = (words * repeats)[:target_length]
-    return " ".join(expanded)
-
-
-def build_inputs(dataset: list[str], target_length: int, total_requests: int) -> list[str]:
-    return [
-        resize_text(dataset[i % len(dataset)], target_length)
-        for i in range(total_requests)
-    ]
-
-
-def percentile(values: list[float], q: float) -> float:
-    if not values:
-        return 0.0
-    if len(values) == 1:
-        return values[0]
-
-    ordered = sorted(values)
-    position = (len(ordered) - 1) * q
-    lower = int(position)
-    upper = min(lower + 1, len(ordered) - 1)
-    fraction = position - lower
-    return ordered[lower] + (ordered[upper] - ordered[lower]) * fraction
-
-
-def post_embedding_request(
-    *,
-    base_url: str,
-    model: str,
-    api_key: str | None,
-    text: str,
-    timeout: float,
-) -> RequestResult:
-    body = json.dumps({"model": model, "input": text}).encode("utf-8")
-    headers = {"Content-Type": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-
-    request = urllib.request.Request(
-        url=f"{base_url.rstrip('/')}/v1/embeddings",
-        data=body,
-        headers=headers,
-        method="POST",
+    assert config_path.exists(), FileNotFoundError(
+        f"Config file not found: {config_path}"
     )
 
-    start = time.perf_counter()
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            _ = response.read()
-            latency = time.perf_counter() - start
-            return RequestResult(
-                ok=True,
-                latency_s=latency,
-                status_code=response.status,
-                error=None,
-            )
-    except urllib.error.HTTPError as exc:
-        latency = time.perf_counter() - start
-        details = exc.read().decode("utf-8", errors="replace")
-        return RequestResult(
-            ok=False,
-            latency_s=latency,
-            status_code=exc.code,
-            error=details,
-        )
-    except Exception as exc:  # noqa: BLE001
-        latency = time.perf_counter() - start
-        return RequestResult(
-            ok=False,
-            latency_s=latency,
-            status_code=None,
-            error=str(exc),
-        )
+    with config_path.open("r", encoding="utf-8") as handle:
+        return yaml.safe_load(handle) or {}
+
+
+def apply_config_defaults(
+    args: argparse.Namespace, config: dict[str, Any]
+) -> argparse.Namespace:
+    """Apply YAML config values only when the CLI did not override them."""
+    if args.model is None:
+        args.model = config.get("model")
+
+    if args.base_url == "http://localhost:8000":
+        port = config.get("port")
+        if port is not None:
+            args.base_url = f"http://localhost:{port}"
+
+    if args.api_key is None:
+        args.api_key = config.get("api_key")
+
+    if (
+        args.input_lengths == DEFAULT_INPUT_LENGTHS
+        and config.get("input_lengths") is not None
+    ):
+        args.input_lengths = config["input_lengths"]
+
+    if (
+        args.request_rates == DEFAULT_REQUEST_RATES
+        and config.get("request_rates") is not None
+    ):
+        args.request_rates = config["request_rates"]
+
+    if args.num_prompts == 100 and config.get("num_prompts") is not None:
+        args.num_prompts = config["num_prompts"]
+
+    if args.max_concurrency == 32 and config.get("max_concurrency") is not None:
+        args.max_concurrency = config["max_concurrency"]
+
+    if args.dataset_name == "random" and config.get("dataset_name") is not None:
+        args.dataset_name = config["dataset_name"]
+
+    if args.dataset_path is None and config.get("dataset_path") is not None:
+        args.dataset_path = Path(config["dataset_path"])
+
+    if args.num_warmups == 3 and config.get("num_warmups") is not None:
+        args.num_warmups = config["num_warmups"]
+
+    if (
+        args.result_dir == Path("results/vllm_embeddings")
+        and config.get("result_dir") is not None
+    ):
+        args.result_dir = Path(config["result_dir"])
+
+    if args.output_json is None and config.get("output_json") is not None:
+        args.output_json = Path(config["output_json"])
+
+    if not args.model:
+        raise ValueError("A model must be set with --model or in the config file.")
+
+    return args
+
+
+def append_arg(command: list[str], flag: str, value: str | int | float | None) -> None:
+    """Append a CLI flag and value when the value is not None."""
+    if value is None:
+        return
+    command.extend([flag, str(value)])
+
+
+def build_command(
+    args: argparse.Namespace,
+    input_length: int,
+    request_rate: float,
+    result_filename: str,
+) -> list[str]:
+    """Build one `vllm bench serve` command for embeddings."""
+    command = [
+        "vllm",
+        "bench",
+        "serve",
+        "--model",
+        args.model,
+        "--backend",
+        "openai-embeddings",
+        "--endpoint",
+        "/v1/embeddings",
+        "--base-url",
+        args.base_url,
+        "--dataset-name",
+        args.dataset_name,
+        "--num-prompts",
+        str(args.num_prompts),
+        "--request-rate",
+        str(request_rate),
+        "--max-concurrency",
+        str(args.max_concurrency),
+        "--input-len",
+        str(input_length),
+        "--num-warmups",
+        str(args.num_warmups),
+        "--percentile-metrics",
+        "e2el",
+        "--metric-percentiles",
+        "95",
+        "--save-result",
+        "--result-dir",
+        str(args.result_dir),
+        "--result-filename",
+        result_filename,
+        "--disable-tqdm",
+    ]
+
+    append_arg(command, "--dataset-path", args.dataset_path)
+
+    if args.api_key:
+        command.extend(["--header", f"Authorization: Bearer {args.api_key}"])
+
+    return command
 
 
 def run_single_benchmark(
-    *,
-    base_url: str,
-    model: str,
-    api_key: str | None,
-    texts: Iterable[str],
-    target_rps: float,
-    max_workers: int,
-    timeout: float,
-) -> tuple[BenchmarkResult, list[RequestResult]]:
-    texts = list(texts)
-    results: list[RequestResult] = []
-    result_lock = threading.Lock()
+    args: argparse.Namespace,
+    input_length: int,
+    request_rate: float,
+):
+    """Run one benchmark command and return the extracted metrics."""
+    result_filename = f"embeddings_in{input_length}_rps{request_rate}.json"
+    command = build_command(args, input_length, request_rate, result_filename)
 
-    start_time = time.perf_counter()
-
-    def task(text: str) -> None:
-        result = post_embedding_request(
-            base_url=base_url,
-            model=model,
-            api_key=api_key,
-            text=text,
-            timeout=timeout,
-        )
-        with result_lock:
-            results.append(result)
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = []
-        for index, text in enumerate(texts):
-            scheduled_at = start_time + (index / target_rps)
-            delay = scheduled_at - time.perf_counter()
-            if delay > 0:
-                time.sleep(delay)
-            futures.append(executor.submit(task, text))
-
-        for future in futures:
-            future.result()
-
-    elapsed_s = time.perf_counter() - start_time
-    latencies_ms = [item.latency_s * 1000.0 for item in results if item.ok]
-    requests_ok = sum(1 for item in results if item.ok)
-    requests_failed = len(results) - requests_ok
-
-    benchmark = BenchmarkResult(
-        input_length=len(texts[0].split()) if texts else 0,
-        target_rps=target_rps,
-        requests_sent=len(results),
-        requests_ok=requests_ok,
-        requests_failed=requests_failed,
-        elapsed_s=elapsed_s,
-        achieved_rps=(requests_ok / elapsed_s) if elapsed_s > 0 else 0.0,
-        avg_latency_ms=statistics.fmean(latencies_ms) if latencies_ms else 0.0,
-        p95_latency_ms=percentile(latencies_ms, 0.95) if latencies_ms else 0.0,
-    )
-    return benchmark, results
-
-
-def warmup(
-    *,
-    base_url: str,
-    model: str,
-    api_key: str | None,
-    texts: list[str],
-    timeout: float,
-    warmup_requests: int,
-) -> None:
-    for text in texts[:warmup_requests]:
-        post_embedding_request(
-            base_url=base_url,
-            model=model,
-            api_key=api_key,
-            text=text,
-            timeout=timeout,
-        )
-
-
-def print_result(result: BenchmarkResult) -> None:
-    print(
-        f"input_len={result.input_length:>5} | "
-        f"target_rps={result.target_rps:>6.2f} | "
-        f"achieved_rps={result.achieved_rps:>6.2f} | "
-        f"avg_latency_ms={result.avg_latency_ms:>8.2f} | "
-        f"p95_latency_ms={result.p95_latency_ms:>8.2f} | "
-        f"ok={result.requests_ok:>4} | failed={result.requests_failed:>4}"
-    )
+    print(f"Running: {' '.join(command)}")
+    subprocess.run(command, check=True)
 
 
 def main() -> None:
+    """Run the full benchmark sweep."""
     args = parse_args()
-    dataset = load_dataset(args)
+    config_path = Path(args.config)
+    config = load_config(config_path)
+    args = apply_config_defaults(args, config)
+    args.result_dir.mkdir(parents=True, exist_ok=True)
 
-    all_results: list[BenchmarkResult] = []
-
-    print("Warming up endpoint...")
-    warmup_texts = build_inputs(
-        dataset=dataset,
-        target_length=min(args.input_lengths),
-        total_requests=max(args.warmup_requests, 1),
-    )
-    warmup(
-        base_url=args.base_url,
-        model=args.model,
-        api_key=args.api_key,
-        texts=warmup_texts,
-        timeout=args.timeout,
-        warmup_requests=args.warmup_requests,
-    )
-
-    print("Starting benchmark sweep...")
     for input_length in args.input_lengths:
-        run_inputs = build_inputs(
-            dataset=dataset,
-            target_length=input_length,
-            total_requests=args.requests_per_run,
-        )
         for request_rate in args.request_rates:
-            result, request_results = run_single_benchmark(
-                base_url=args.base_url,
-                model=args.model,
-                api_key=args.api_key,
-                texts=run_inputs,
-                target_rps=request_rate,
-                max_workers=args.max_workers,
-                timeout=args.timeout,
-            )
-            all_results.append(result)
-            print_result(result)
-
-            failed = [item for item in request_results if not item.ok]
-            if failed:
-                first_failure = failed[0]
-                print(
-                    "  first_error="
-                    f"{first_failure.status_code or 'request_error'} {first_failure.error}"
-                )
-
-    if args.output_json:
-        args.output_json.parent.mkdir(parents=True, exist_ok=True)
-        args.output_json.write_text(
-            json.dumps([asdict(result) for result in all_results], indent=2),
-            encoding="utf-8",
-        )
-        print(f"Saved results to {args.output_json}")
+            run_single_benchmark(args, input_length, request_rate)
 
 
 if __name__ == "__main__":

@@ -42,7 +42,7 @@ class FormatComplianceInput(BaseModel):
 class FormatCompliancePrompt(PydanticPrompt[FormatComplianceInput, ScoreWithReason]):
     instruction: str = (
         "Valuta quanto la *risposta* segue *le istruzioni di formato* contenute nell'ultima query dell'utente.\n"
-        "Se la query contiene indicazioni esplicite (es. \"rispondi in JSON con campi x, y\", \"usa un elenco puntato Markdown\", \"scrivi solamente tre frasi\"), controlla che la risposta rispetti esattamente il formato richiesto.\n"
+        'Se la query contiene indicazioni esplicite (es. "rispondi in JSON con campi x, y", "usa un elenco puntato Markdown", "scrivi solamente tre frasi"), controlla che la risposta rispetti esattamente il formato richiesto.\n'
         "Rendi un JSON con: `score` (0‒1, due decimali) e `reason` (≤40 parole)."
     )
 
@@ -53,8 +53,8 @@ class FormatCompliancePrompt(PydanticPrompt[FormatComplianceInput, ScoreWithReas
         # Example 1 – compliant JSON
         (
             FormatComplianceInput(
-                user_query="Rispondi in JSON: {\"temperatura\": numero}",
-                response="{\"temperatura\": 100}",
+                user_query='Rispondi in JSON: {"temperatura": numero}',
+                response='{"temperatura": 100}',
             ),
             ScoreWithReason(score=1.0, reason="Formato JSON esatto come richiesto."),
         ),
@@ -72,9 +72,11 @@ class FormatCompliancePrompt(PydanticPrompt[FormatComplianceInput, ScoreWithReas
                 user_query="Per favore rispondi con una lista puntata Markdown.",
                 response="Ci sono diverse cose da sapere sull'acqua, un elemento molto interessante.\n- il punto di ebollizione è 100 gradi\n- ma può variare con l'altitudine",
             ),
-            ScoreWithReason(score=0.6, reason="La risposta contiene l'elenco puntato ma anche una sezione di testo libero."),
+            ScoreWithReason(
+                score=0.6,
+                reason="La risposta contiene l'elenco puntato ma anche una sezione di testo libero.",
+            ),
         ),
-        
     ]
 
 
@@ -85,9 +87,7 @@ class FormatComplianceIT(MetricWithLLM, SingleTurnMetric):
     name: str = "format_compliance_it"
 
     _required_columns: t.Dict[MetricType, t.Set[str]] = field(
-        default_factory=lambda: {
-            MetricType.SINGLE_TURN: {"user_input", "response"}
-        }
+        default_factory=lambda: {MetricType.SINGLE_TURN: {"user_input", "response"}}
     )
     output_type: MetricOutputType = MetricOutputType.CONTINUOUS
     compliance_prompt: PydanticPrompt = field(default_factory=FormatCompliancePrompt)
@@ -99,7 +99,9 @@ class FormatComplianceIT(MetricWithLLM, SingleTurnMetric):
         user_query = sample.user_input.strip()
         response = sample.response.strip()
         if not response:
-            raise ValueError("'response' è vuoto: impossibile valutare la compliance di formato.")
+            raise ValueError(
+                "'response' è vuoto: impossibile valutare la compliance di formato."
+            )
 
         prompt_input = FormatComplianceInput(user_query=user_query, response=response)
         result: ScoreWithReason = await self.compliance_prompt.generate(

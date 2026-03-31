@@ -15,10 +15,10 @@ from ragas.metrics.base import (
     SingleTurnMetric,
 )
 from ragas.prompt import PydanticPrompt
+from langchain_core.callbacks import Callbacks
+
 
 logger = logging.getLogger(__name__)
-
-from langchain_core.callbacks import Callbacks
 
 
 class ResponseRelevanceOutput(BaseModel):
@@ -34,7 +34,7 @@ class ResponseRelevancePromptIT(
     PydanticPrompt[ResponseRelevanceInput, ResponseRelevanceOutput]
 ):
     instruction = """Genera una domanda basata sulla risposta fornita e identifica se la risposta è evasiva. Imposta 'noncommittal' a 1 se la risposta è evasiva e a 0 se è chiara e decisa. Una risposta evasiva è vaga, ambigua o evita di fornire un'informazione precisa. Ad esempio, "Non lo so" o "Non ne sono sicuro" sono risposte evasive."""
-    
+
     input_model = ResponseRelevanceInput
     output_model = ResponseRelevanceOutput
 
@@ -58,7 +58,6 @@ class ResponseRelevancePromptIT(
             ),
         ),
     ]
-
 
 
 @dataclass
@@ -92,12 +91,12 @@ class ResponseRelevancyIT(MetricWithLLM, MetricWithEmbeddings, SingleTurnMetric)
     output_type = MetricOutputType.CONTINUOUS
 
     question_generation: PydanticPrompt = ResponseRelevancePromptIT()
-    strictness: int = 1 #3
+    strictness: int = 1  # 3
 
     def calculate_similarity(self, question: str, generated_questions: list[str]):
-        assert (
-            self.embeddings is not None
-        ), f"Error: '{self.name}' requires embeddings to be set."
+        assert self.embeddings is not None, (
+            f"Error: '{self.name}' requires embeddings to be set."
+        )
         question_vec = np.asarray(self.embeddings.embed_query(question)).reshape(1, -1)
         gen_question_vec = np.asarray(
             self.embeddings.embed_documents(generated_questions)

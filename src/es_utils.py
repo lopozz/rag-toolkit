@@ -2,6 +2,7 @@ import pandas as pd
 from ir_measures import iter_calc
 from nltk.tokenize import sent_tokenize
 
+
 def bm25_search(client, index_name: str, text: str, k=10):
     res = client.search(
         index=index_name, size=k, query={"match": {"text": {"query": text}}}

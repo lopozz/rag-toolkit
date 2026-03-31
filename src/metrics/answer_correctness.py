@@ -109,7 +109,7 @@ class CorrectnessClassifierIT(
                         reason="L'effetto della luce solare sui modelli meteorologici e sulle correnti oceaniche è omesso nella risposta.",
                     ),
                 ],
-            )
+            ),
         ),
         (
             QuestionAnswerGroundTruth(
@@ -136,7 +136,7 @@ class CorrectnessClassifierIT(
                         reason="Questa informazione aggiuntiva su come il punto di ebollizione dell'acqua possa variare con l'altitudine non è menzionata nella risposta.",
                     )
                 ],
-            )
+            ),
         ),
     ]
 

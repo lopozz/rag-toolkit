@@ -10,6 +10,7 @@ dependencies = [
     "mteb>=2.10.0",
     "nltk>=3.9.3",
     "pandas>=2.3.3",
+    "ruff>=0.15.8",
     "sentence-transformers>=5.2.3",
     "vllm>=0.16.0",
 ]
