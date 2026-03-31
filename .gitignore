@@ -8,3 +8,4 @@ traces/
 elastic-start-local/
 data/
 datasets.ipynb
+.codex
