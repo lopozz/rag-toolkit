@@ -1,0 +1,10 @@
+model: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+port: 8000
+container_name: paraphrase-multilingual-MiniLM-L12-v2-embedder
+gpu_memory_utilization: 0.95
+max_model_len: 128
+max_num_seqs: 1
+image: vllm/vllm-openai:latest
+extra_vllm_args:
+  - --runner
+  - pooling

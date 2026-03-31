@@ -3,28 +3,19 @@
 
 from __future__ import annotations
 
+import os
+import sys
 import argparse
 import subprocess
-from dataclasses import dataclass
+import urllib.error
+import urllib.request
 from pathlib import Path
-from typing import Any
-import yaml
 
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from src.utils import safe_filename
 
 DEFAULT_INPUT_LENGTHS = [32, 128, 512, 1024]
 DEFAULT_REQUEST_RATES = [1.0, 2.0, 4.0, 8.0]
-
-
-@dataclass
-class BenchmarkSummary:
-    """Store the metrics extracted from one benchmark run."""
-
-    input_length: int
-    target_rps: float
-    achieved_rps: float
-    latency_ms: float
-    p95_latency_ms: float
-    result_file: str
 
 
 def parse_args() -> argparse.Namespace:
@@ -32,13 +23,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Benchmark a vLLM embedding endpoint with vllm bench serve."
     )
-    parser.add_argument(
-        "config",
-        nargs="?",
-        default=None,
-        help="Optional YAML config path or config name under configs/embedders.",
-    )
-    parser.add_argument("--model", default=None, help="Served model name.")
+    parser.add_argument("--model", required=True, help="Served model name.")
     parser.add_argument(
         "--base-url",
         default="http://localhost:8000",
@@ -107,79 +92,28 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_config(config_path: Path | None) -> dict[str, Any]:
-    """Load benchmark defaults from a YAML config file."""
-
-    assert config_path.exists(), FileNotFoundError(
-        f"Config file not found: {config_path}"
-    )
-
-    with config_path.open("r", encoding="utf-8") as handle:
-        return yaml.safe_load(handle) or {}
-
-
-def apply_config_defaults(
-    args: argparse.Namespace, config: dict[str, Any]
-) -> argparse.Namespace:
-    """Apply YAML config values only when the CLI did not override them."""
-    if args.model is None:
-        args.model = config.get("model")
-
-    if args.base_url == "http://localhost:8000":
-        port = config.get("port")
-        if port is not None:
-            args.base_url = f"http://localhost:{port}"
-
-    if args.api_key is None:
-        args.api_key = config.get("api_key")
-
-    if (
-        args.input_lengths == DEFAULT_INPUT_LENGTHS
-        and config.get("input_lengths") is not None
-    ):
-        args.input_lengths = config["input_lengths"]
-
-    if (
-        args.request_rates == DEFAULT_REQUEST_RATES
-        and config.get("request_rates") is not None
-    ):
-        args.request_rates = config["request_rates"]
-
-    if args.num_prompts == 100 and config.get("num_prompts") is not None:
-        args.num_prompts = config["num_prompts"]
-
-    if args.max_concurrency == 32 and config.get("max_concurrency") is not None:
-        args.max_concurrency = config["max_concurrency"]
-
-    if args.dataset_name == "random" and config.get("dataset_name") is not None:
-        args.dataset_name = config["dataset_name"]
-
-    if args.dataset_path is None and config.get("dataset_path") is not None:
-        args.dataset_path = Path(config["dataset_path"])
-
-    if args.num_warmups == 3 and config.get("num_warmups") is not None:
-        args.num_warmups = config["num_warmups"]
-
-    if (
-        args.result_dir == Path("results/vllm_embeddings")
-        and config.get("result_dir") is not None
-    ):
-        args.result_dir = Path(config["result_dir"])
-
-    if args.output_json is None and config.get("output_json") is not None:
-        args.output_json = Path(config["output_json"])
-
-    if not args.model:
-        raise ValueError("A model must be set with --model or in the config file.")
-
-    return args
-
-
 def append_arg(command: list[str], flag: str, value: str | int | float | None) -> None:
     """Append a CLI flag and value when the value is not None."""
     if value is None:
         return
     command.extend([flag, str(value)])
+
+
+def check_server_ready(base_url: str) -> None:
+    """Raise a clear error if the configured vLLM server is not reachable."""
+    health_url = f"{base_url.rstrip('/')}/health"
+    request = urllib.request.Request(health_url, method="GET")
+
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            if response.status >= 400:
+                raise RuntimeError(
+                    f"vLLM server check failed at {health_url} with status {response.status}."
+                )
+    except urllib.error.URLError as exc:
+        raise RuntimeError(
+            f"No vLLM server found at {base_url}. Start the container before running the benchmark."
+        ) from exc
 
 
 def build_command(
@@ -239,7 +173,8 @@ def run_single_benchmark(
     request_rate: float,
 ):
     """Run one benchmark command and return the extracted metrics."""
-    result_filename = f"embeddings_in{input_length}_rps{request_rate}.json"
+    model_name = safe_filename(args.model)
+    result_filename = f"{model_name}_{input_length}tk_{request_rate}rps.json"
     command = build_command(args, input_length, request_rate, result_filename)
 
     print(f"Running: {' '.join(command)}")
@@ -249,9 +184,7 @@ def run_single_benchmark(
 def main() -> None:
     """Run the full benchmark sweep."""
     args = parse_args()
-    config_path = Path(args.config)
-    config = load_config(config_path)
-    args = apply_config_defaults(args, config)
+    check_server_ready(args.base_url)
     args.result_dir.mkdir(parents=True, exist_ok=True)
 
     for input_length in args.input_lengths:

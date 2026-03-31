@@ -1,9 +1,0 @@
-model: "BAAI/bge-m3"
-port: 8000
-
-input_lengths: [32, 128, 512, 1024]
-request_rates: [1.0, 2.0, 4.0, 8.0]
-num_prompts: 100
-max_concurrency: 32
-dataset_name: "random"
-num_warmups: 0
