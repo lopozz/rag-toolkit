@@ -15,7 +15,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from src.utils import safe_filename
 
 DEFAULT_INPUT_LENGTHS = [32, 128, 512, 1024]
-DEFAULT_REQUEST_RATES = [1.0, 2.0, 4.0, 8.0]
+DEFAULT_REQUEST_RATES = [1, 2, 4, 8]
 
 
 def parse_args() -> argparse.Namespace:
@@ -39,7 +39,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--request-rates",
         nargs="+",
-        type=float,
+        type=int,
         default=DEFAULT_REQUEST_RATES,
         help="Request rates to benchmark.",
     )
@@ -52,8 +52,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-concurrency",
         type=int,
-        default=32,
-        help="Maximum number of concurrent requests.",
+        default=None,
+        help="Maximum number of concurrent requests. Defaults to request-rate.",
     )
     parser.add_argument(
         "--dataset-name",
@@ -119,10 +119,16 @@ def check_server_ready(base_url: str) -> None:
 def build_command(
     args: argparse.Namespace,
     input_length: int,
-    request_rate: float,
+    request_rate: int,
     result_filename: str,
 ) -> list[str]:
     """Build one `vllm bench serve` command for embeddings."""
+    max_concurrency = (
+        args.max_concurrency
+        if args.max_concurrency is not None
+        else max(1, request_rate)
+    )
+
     command = [
         "vllm",
         "bench",
@@ -142,7 +148,7 @@ def build_command(
         "--request-rate",
         str(request_rate),
         "--max-concurrency",
-        str(args.max_concurrency),
+        str(max_concurrency),
         "--input-len",
         str(input_length),
         "--num-warmups",
@@ -170,11 +176,11 @@ def build_command(
 def run_single_benchmark(
     args: argparse.Namespace,
     input_length: int,
-    request_rate: float,
+    request_rate: int,
 ):
     """Run one benchmark command and return the extracted metrics."""
     model_name = safe_filename(args.model)
-    result_filename = f"{model_name}_{input_length}tk_{request_rate}rps.json"
+    result_filename = f"{model_name}--{args.num_prompts}prompts--{input_length}tk--{request_rate}rps.json"
     command = build_command(args, input_length, request_rate, result_filename)
 
     print(f"Running: {' '.join(command)}")
